@@ -110,7 +110,7 @@ pipeline {
           steps {
             script {
               checkoutRepos(BRANCH_NAME)
-              mergeRelease(branch)
+              mergeRelease(BRANCH_NAME)
             }
           }
         }
