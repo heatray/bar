@@ -249,11 +249,11 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
   for (repo in reposList) {
     dir (repo.owner + '/' + repo.name) {
       Integer retC = createBranch(repo, branch, baseBranch)
-      if (protect) {
-        Integer retP = protectBranch(repo, branch)
-        regStat(retC == 0 && retP == 0)
-      } else {
+      if (!protect) {
         regStat(retC == 0)
+      } else {
+        Integer retP = protectBranch(repo, branch)
+        regStat(retC == 0, retP == 0)
       }
     }
   }
@@ -264,23 +264,24 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
   if (stats.success > 0) sendNotification()
 }
 
-def regStat(Boolean ret) {
-  if (ret) {
-    stats.list += "✅"
+def regStat(Boolean action, Boolean protect = false) {
+  if (action) {
     stats.success++
+    stats.list += '✅'
   } else {
-    stats.list += "❎"
+    stats.list += '❎'
   }
+  if (protect) stats.list += '🛡'
   stats.list += " ${repo}\n"
 }
 
 def setBuildStatus() {
   if (stats.success == 0) {
-    currentBuild.result = "FAILURE"
+    currentBuild.result = 'FAILURE'
   } else if (stats.success != stats.total) {
-    currentBuild.result = "UNSTABLE"
+    currentBuild.result = 'UNSTABLE'
   } else if (stats.success == stats.total) {
-    currentBuild.result = "SUCCESS"
+    currentBuild.result = 'SUCCESS'
   }
 }
 
