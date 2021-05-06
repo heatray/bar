@@ -38,6 +38,11 @@ if (BRANCH_NAME.startsWith('release')) {
   // defaults.base_branch = 'develop'
 }
 
+reposList = [
+  [owner: 'heatray', name: 'foo', dir: 'foo'],
+  [owner: 'heatray', name: 'bar', dir: 'bar']
+]
+
 pipeline {
   agent { label 'linux_64' }
   parameters {
@@ -90,27 +95,19 @@ pipeline {
       parallel {
         stage('Start Release') {
           when {
-            expression {
-              params.action_type == 'start_release' ||
-              BRANCH_NAME == 'master' ||
-              BRANCH_NAME == 'develop'
-            }
+            expression { params.action_type == 'start_release' }
             beforeAgent true
           }
           steps {
             script {
               checkoutRepos(BRANCH_NAME)
-              // startRelease(branch, BRANCH_NAME, params.protect_branch)
+              startRelease(branch, BRANCH_NAME, params.protect_branch)
             }
           }
         }
         stage('Merge Release') {
           when {
-            expression {
-              params.action_type == 'finish_release' ||
-              BRANCH_NAME.startsWith('hotfix') ||
-              BRANCH_NAME.startsWith('release')
-            }
+            expression { params.action_type == 'finish_release' }
             beforeAgent true
           }
           steps {
@@ -122,11 +119,7 @@ pipeline {
         }
         stage('Finish Release') {
           when {
-            expression {
-              params.action_type == 'merge_release' ||
-              BRANCH_NAME.startsWith('hotfix') ||
-              BRANCH_NAME.startsWith('release')
-            }
+            expression { params.action_type == 'merge_release' }
             beforeAgent true
           }
           steps {
@@ -142,11 +135,7 @@ pipeline {
         }
         stage('Print Branches') {
           when {
-            expression {
-              params.action_type == 'print_branches' ||
-              BRANCH_NAME == 'master' ||
-              BRANCH_NAME == 'develop'
-            }
+            expression { params.action_type == 'print_branches' }
             beforeAgent true
           }
           steps {
@@ -158,11 +147,7 @@ pipeline {
         }
         stage('Unprotect Release') {
           when {
-            expression {
-              params.action_type == 'unprotect_release' ||
-              BRANCH_NAME.startsWith('hotfix') ||
-              BRANCH_NAME.startsWith('release')
-            }
+            expression { params.action_type == 'unprotect_release' }
             beforeAgent true
           }
           steps {
@@ -177,38 +162,132 @@ pipeline {
   }
 }
 
-reposList = [
-  [owner: 'heatray', name: 'foo', dir: 'foo'],
-  [owner: 'heatray', name: 'bar', dir: 'bar']
-]
-
 def checkoutRepo(Map repo, String branch = 'master') {
   env.REPO = repo.owner + '/' + repo.name
   env.BRANCH = branch
-  return sh '''#!/bin/bash -xe
-    if [[ ! -d $REPO ]]; do
-      #mkdir -p $REPO
-      git clone -b $BRANCH git@github.com:$REPO.git $REPO
-    else
-      if [[ $(git rev-parse --is-inside-work-tree) != 'true' ]]; do
-        rm -rfv $REPO
-        #mkdir -p $REPO
+  sh label: "${REPO}: checkout",
+    script: '''#!/bin/bash -xe
+      if [[ ! -d $REPO ]]; then
         git clone -b $BRANCH git@github.com:$REPO.git $REPO
       else
-        pushd $REPO
-        git fetch --prune origin $BRANCH
-        git reset --hard origin/$BRANCH
-        git pull --force origin $BRANCH
-        #git clean -xdf
-        popd      
+        if [[ $(git rev-parse --is-inside-work-tree) != 'true' ]]; then
+          rm -rfv $REPO
+          git clone -b $BRANCH git@github.com:$REPO.git $REPO
+        else
+          pushd $REPO
+          git fetch -p origin $BRANCH
+          git reset --hard origin/$BRANCH
+          git pull -f origin $BRANCH
+          #git clean -xdf
+          popd      
+        fi
       fi
-    fi
-  '''
+    '''
 }
 
 def checkoutRepos(String branch = 'master') {    
   // for (repo in utils.getReposList()) {
   for (repo in reposList) {
     checkoutRepo(repo, branch)
+  }
+}
+
+def createBranch(Map repo, String branch, String baseBranch) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  env.BASE_BRANCH = baseBranch
+  return sh (
+    label: "${REPO}: start ${BRANCH}",
+    script: '''#!/bin/bash -xe
+      # create develop if doesn't exist
+      if git ls-remote --heads --exit-code . develop; then
+        git checkout -f master
+        git checkout -b develop
+        git push origin develop
+        git checkout -f $BASE_BRANCH
+      fi
+      if git ls-remote --heads --exit-code . $BRANCH; then
+        exit 0
+      fi
+      git checkout -B $BRANCH
+      git push origin $BRANCH
+      sleep 3s
+    ''',
+    returnStatus: true
+  )
+}
+
+def protectBranch(Map repo, String branch) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  return sh (
+    label: "${REPO}: protect ${BRANCH}",
+    script: '''#!/bin/bash -xe
+      echo '{
+        "required_status_checks": null,
+        "enforce_admins": true,
+        "required_pull_request_reviews": null,
+        "restrictions": {
+          "users": [],
+          "teams": []
+        }
+      }' | \
+      gh api -X PUT repos/$REPO/branches/$BRANCH/protection --input -
+    ''',
+    returnStatus: true
+  )
+}
+
+def startRelease(String branch, String baseBranch, Boolean protect) {
+  Integer success = 0
+  Integer total = reposList.size()
+  for (repo in reposList) {
+    dir (repo.owner + '/' + repo.name) {
+      Integer retC = createBranch(repo, branch, baseBranch)
+      if (protect) {
+        Integer retP = protectBranch(repo, branch)
+        regStat(retC == 0 && retP == 0)
+      } else {
+        regStat(retC == 0)
+      }
+    }
+  }
+  setBuildStatus(success, total)
+  notifyMessage = "Branch `${branch}` created from `${baseBranch}` \\[${success}/${total}\\]\n" + notifyMessage
+  if (success > 0) sendNotification()
+}
+
+def regStat(Boolean ret) {
+  if (ret) {
+    notifyMessage += "✅"
+    success++
+  } else {
+    notifyMessage += "❎"
+  }
+  notifyMessage += " ${repo}\n"
+}
+
+def setBuildStatus(Integer success, Integer total) {
+  if (success == 0) {
+    currentBuild.result = "FAILURE"
+  } else if (success != total) {
+    currentBuild.result = "UNSTABLE"
+  } else if (success == total) {
+    currentBuild.result = "SUCCESS"
+  }
+}
+
+def sendNotification() {
+  int chatId = -579429080 // test
+
+  withCredentials([string(
+    credentialsId: 'telegram-bot-token',
+    variable: 'TELEGRAM_TOKEN'
+  )]) {
+    sh "curl -X POST -s -S \
+      -d parse_mode=markdown \
+      -d chat_id=${chatId} \
+      --data-urlencode text=\"${notifyMessage}\" \
+      https://api.telegram.org/bot\$TELEGRAM_TOKEN/sendMessage"
   }
 }
