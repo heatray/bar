@@ -205,7 +205,7 @@ def createBranch(Map repo, String branch, String baseBranch) {
     label: "${REPO}: start ${BRANCH}",
     script: '''#!/bin/bash -xe
       # create develop if doesn't exist
-      if git ls-remote --heads --exit-code . develop; then
+      if ! git ls-remote --heads --exit-code . develop; then
         git checkout -f master
         git checkout -b develop
         git push origin develop
