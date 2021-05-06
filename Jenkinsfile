@@ -41,11 +41,6 @@ pipeline {
       description:  "Action type\nmaster > hotfix\ndevelop > release",
       choices:      defaults.action_type
     )
-    // choice (
-    //   name:         'release_type',
-    //   description:  'Release type',
-    //   choices:      ['hotfix', 'release']
-    // )
     string (
       name:         'vesion',
       description:  'Release version',
@@ -83,6 +78,18 @@ pipeline {
     }
     stage('Flow') {
       parallel {
+        stage('Print Branches') {
+          when {
+            expression { params.action_type == 'print_branches' }
+            beforeAgent true
+          }
+          steps {
+            script {
+              echo "Print Branches"
+              // printReposBranches()
+            }
+          }
+        }
         stage('Start Release') {
           when {
             expression { params.action_type == 'start_release' }
@@ -123,18 +130,6 @@ pipeline {
             }
           }
         }
-        stage('Print Branches') {
-          when {
-            expression { params.action_type == 'print_branches' }
-            beforeAgent true
-          }
-          steps {
-            script {
-              echo "Print Branches"
-              // printReposBranches()
-            }
-          }
-        }
         stage('Unprotect Release') {
           when {
             expression { params.action_type == 'unprotect_release' }
@@ -155,7 +150,8 @@ pipeline {
 def checkoutRepo(Map repo, String branch = 'master') {
   env.REPO = repo.owner + '/' + repo.name
   env.BRANCH = branch
-  sh label: "${REPO}: checkout",
+  sh (
+    label: "${REPO}: checkout",
     script: '''#!/bin/bash -xe
       if [[ ! -d $REPO ]]; then
         git clone -b $BRANCH git@github.com:$REPO.git $REPO
@@ -168,11 +164,11 @@ def checkoutRepo(Map repo, String branch = 'master') {
           git fetch -p
           git reset --hard origin/$BRANCH
           git pull -f origin $BRANCH
-          #git clean -xdf
           popd      
         fi
       fi
     '''
+  )
 }
 
 def checkoutRepos(String branch = 'master') {    
@@ -249,12 +245,8 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
 }
 
 def setStats(Boolean action, Boolean protect = false) {
-  if (action) {
-    stats.success++
-    stats.list += '✅'
-  } else {
-    stats.list += '❎'
-  }
+  if (action) stats.success++
+  if (action) stats.list += '✅' else stats.list += '❎'
   if (protect) stats.list += '🛡'
   stats.list += " ${repo}\n"
 }
@@ -270,8 +262,7 @@ def setBuildStatus() {
 }
 
 def sendNotification() {
-  int chatId = -579429080 // test
-
+  Integer chatId = -579429080 // test
   withCredentials([string(
     credentialsId: 'telegram-bot-token',
     variable: 'TELEGRAM_TOKEN'
