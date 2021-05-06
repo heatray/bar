@@ -259,7 +259,7 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
   }
   setBuildStatus()
   notifyMessage = "Branch `${branch}` created from `${baseBranch}`"
-  notifyMessage += " \\[${stats.success}/${stats.total}\\]\n"
+  notifyMessage += " \\[${stats.success}/${stats.total}]\n"
   notifyMessage += stats.list
   if (stats.success > 0) sendNotification()
 }
@@ -294,7 +294,7 @@ def sendNotification() {
     sh "curl -X POST -s -S \
       -d parse_mode=markdown \
       -d chat_id=${chatId} \
-      --data-urlencode text=\"${notifyMessage}\" \
+      --data-urlencode text='${notifyMessage}' \
       https://api.telegram.org/bot\$TELEGRAM_TOKEN/sendMessage"
   }
 }
