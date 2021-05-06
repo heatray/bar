@@ -1,0 +1,214 @@
+defaults = [
+  action_type: [
+    'none',
+    'start_release',
+    'merge_release',
+    'finish_release',
+    'print_branches',
+    'unprotect_release'
+  ]
+]
+
+isMaster  = BRANCH_NAME == 'master'
+isDevelop = BRANCH_NAME == 'develop'
+isHotfix  = BRANCH_NAME.startsWith('hotfix')
+isRelease = BRANCH_NAME.startsWith('release')
+
+if (BRANCH_NAME == 'master') {
+  defaults.action_type.remove(2) // merge_release
+  defaults.action_type.remove(2) // finish_release
+  defaults.action_type.remove(3) // unprotect_release
+  defaults.release_type = 'hotfix'
+}
+
+if (BRANCH_NAME == 'develop') {
+  defaults.action_type.remove(2) // merge_release
+  defaults.action_type.remove(2) // finish_release
+  defaults.action_type.remove(3) // unprotect_release
+  defaults.release_type = 'release'
+}
+
+if (BRANCH_NAME.startsWith('hotfix')) {
+  defaults.action_type.remove(1) // start_release
+  // defaults.base_branch = 'master'
+}
+
+if (BRANCH_NAME.startsWith('release')) {
+  defaults.action_type.remove(1) // start_release
+  // defaults.base_branch = 'develop'
+}
+
+pipeline {
+  agent { label 'linux_64' }
+  parameters {
+    booleanParam (
+      name:         'wipe',
+      description:  'Wipe out current workspace',
+      defaultValue: false
+    )
+    choice (
+      name:         'action_type',
+      description:  "Action type\nmaster > hotfix\ndevelop > release",
+      choices:      defaults.action_type
+    )
+    // choice (
+    //   name:         'release_type',
+    //   description:  'Release type',
+    //   choices:      ['hotfix', 'release']
+    // )
+    string (
+      name:         'vesion',
+      description:  'Release version',
+      defaultValue: '0.0.0'
+    )
+    booleanParam (
+      name:         'protect_branch',
+      description:  'Protect branch (for start_release only)',
+      defaultValue: true
+    )
+    string (
+      name:         'extra_branch',
+      description:  'Extra branch (for finish_release only)',
+      defaultValue: ''
+    )
+  }
+  stages {
+    stage('Prepare') {
+      steps {
+        script {
+          if (params.wipe) {
+            deleteDir()
+            checkout scm
+          }
+          // utils = load 'utils.groovy'
+          branch = defaults.release_type + '/v' + params.vesion
+          notifyMessage = ''
+        }
+      }
+    }
+    stage('Flow') {
+      parallel {
+        stage('Start Release') {
+          when {
+            expression {
+              params.action_type == 'start_release' ||
+              BRANCH_NAME == 'master' ||
+              BRANCH_NAME == 'develop'
+            }
+            beforeAgent true
+          }
+          steps {
+            script {
+              checkoutRepos(BRANCH_NAME)
+              // startRelease(branch, BRANCH_NAME, params.protect_branch)
+            }
+          }
+        }
+        stage('Merge Release') {
+          when {
+            expression {
+              params.action_type == 'finish_release' ||
+              BRANCH_NAME.startsWith('hotfix') ||
+              BRANCH_NAME.startsWith('release')
+            }
+            beforeAgent true
+          }
+          steps {
+            script {
+              checkoutRepos(BRANCH_NAME)
+              // mergeRelease(branch)
+            }
+          }
+        }
+        stage('Finish Release') {
+          when {
+            expression {
+              params.action_type == 'merge_release' ||
+              BRANCH_NAME.startsWith('hotfix') ||
+              BRANCH_NAME.startsWith('release')
+            }
+            beforeAgent true
+          }
+          steps {
+            script {
+              checkoutRepos(BRANCH_NAME)
+              // if (!params.extra_branch.isEmpty()) {
+              //   finishRelease(branch, params.extra_branch)
+              // } else {
+              //   finishRelease(branch)
+              // }
+            }
+          }
+        }
+        stage('Print Branches') {
+          when {
+            expression {
+              params.action_type == 'print_branches' ||
+              BRANCH_NAME == 'master' ||
+              BRANCH_NAME == 'develop'
+            }
+            beforeAgent true
+          }
+          steps {
+            script {
+              echo "Print Branches"
+              // printReposBranches()
+            }
+          }
+        }
+        stage('Unprotect Release') {
+          when {
+            expression {
+              params.action_type == 'unprotect_release' ||
+              BRANCH_NAME.startsWith('hotfix') ||
+              BRANCH_NAME.startsWith('release')
+            }
+            beforeAgent true
+          }
+          steps {
+            script {
+              echo "Unprotect Release"
+              // unprotectRelease(branch)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+reposList = [
+  [owner: 'heatray', name: 'foo', dir: 'foo'],
+  [owner: 'heatray', name: 'bar', dir: 'bar']
+]
+
+def checkoutRepo(Map repo, String branch = 'master') {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  return sh '''#!/bin/bash -xe
+    if [[ ! -d $REPO ]]; do
+      #mkdir -p $REPO
+      git clone -b $BRANCH git@github.com:$REPO.git $REPO
+    else
+      if [[ $(git rev-parse --is-inside-work-tree) != 'true' ]]; do
+        rm -rfv $REPO
+        #mkdir -p $REPO
+        git clone -b $BRANCH git@github.com:$REPO.git $REPO
+      else
+        pushd $REPO
+        git fetch --prune origin $BRANCH
+        git reset --hard origin/$BRANCH
+        git pull --force origin $BRANCH
+        #git clean -xdf
+        popd      
+      fi
+    fi
+  '''
+}
+
+def checkoutRepos(String branch = 'master') {    
+  // for (repo in utils.getReposList()) {
+  for (repo in reposList) {
+    checkoutRepo(repo, branch)
+  }
+}
