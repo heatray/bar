@@ -1,12 +1,5 @@
 defaults = [
-  action_type: [
-    'none',
-    'start_release',
-    'merge_release',
-    'finish_release',
-    'print_branches',
-    'unprotect_release'
-  ]
+  action_type: [ 'none', 'print_branches' ]
 ]
 
 isMaster  = BRANCH_NAME == 'master'
@@ -15,27 +8,19 @@ isHotfix  = BRANCH_NAME.startsWith('hotfix')
 isRelease = BRANCH_NAME.startsWith('release')
 
 if (BRANCH_NAME == 'master') {
-  defaults.action_type.remove(2) // merge_release
-  defaults.action_type.remove(2) // finish_release
-  defaults.action_type.remove(3) // unprotect_release
   defaults.release_type = 'hotfix'
-}
-
-if (BRANCH_NAME == 'develop') {
-  defaults.action_type.remove(2) // merge_release
-  defaults.action_type.remove(2) // finish_release
-  defaults.action_type.remove(3) // unprotect_release
+} else if (BRANCH_NAME == 'develop') {
   defaults.release_type = 'release'
 }
 
-if (BRANCH_NAME.startsWith('hotfix')) {
-  defaults.action_type.remove(1) // start_release
-  // defaults.base_branch = 'master'
+if (BRANCH_NAME == 'master' || BRANCH_NAME == 'develop') {
+  defaults.action_type.add('start_release')
 }
 
-if (BRANCH_NAME.startsWith('release')) {
-  defaults.action_type.remove(1) // start_release
-  // defaults.base_branch = 'develop'
+if (BRANCH_NAME.startsWith('hotfix') || BRANCH_NAME.startsWith('release')) {
+  defaults.action_type.add('merge_release')
+  defaults.action_type.add('finish_release')
+  defaults.action_type.add('unprotect_release')
 }
 
 reposList = [
@@ -88,9 +73,9 @@ pipeline {
           // utils = load 'utils.groovy'
           branch = defaults.release_type + '/v' + params.vesion
           stats = [
+            list: '',
             success: 0,
-            total: 0,
-            list: ''
+            total: 0
           ]
           notifyMessage = ''
         }
@@ -180,7 +165,7 @@ def checkoutRepo(Map repo, String branch = 'master') {
           git clone -b $BRANCH git@github.com:$REPO.git $REPO
         else
           pushd $REPO
-          git fetch -p origin $BRANCH
+          git fetch -p
           git reset --hard origin/$BRANCH
           git pull -f origin $BRANCH
           #git clean -xdf
@@ -216,7 +201,6 @@ def createBranch(Map repo, String branch, String baseBranch) {
       fi
       git checkout -B $BRANCH
       git push origin $BRANCH
-      sleep 3s
     ''',
     returnStatus: true
   )
