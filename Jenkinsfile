@@ -257,9 +257,11 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
       }
     }
   }
-  setBuildStatus(success, total)
-  notifyMessage = "Branch `${branch}` created from `${baseBranch}` \\[${success}/${total}\\]\n" + stats.list
-  if (success > 0) sendNotification()
+  setBuildStatus()
+  notifyMessage = "Branch `${branch}` created from `${baseBranch}`"
+  notifyMessage += " \\[${stats.success}/${stats.total}\\]\n"
+  notifyMessage += stats.list
+  if (stats.success > 0) sendNotification()
 }
 
 def regStat(Boolean ret) {
