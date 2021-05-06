@@ -288,7 +288,7 @@ def mergeRelease(String branch)
   stats.total = reposList.size()
   for (repo in reposList) {
     dir (repo.dir) {
-      Integer retM = mergeBranch(branch, ['master'], repo)
+      Integer retM = mergeBranch(repo, branch, ['master'])
       setStats(retM == 0)
     }
   }
