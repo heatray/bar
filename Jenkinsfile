@@ -104,29 +104,25 @@ pipeline {
         }
         stage('Merge Release') {
           when {
-            expression { params.action_type == 'finish_release' }
-            beforeAgent true
-          }
-          steps {
-            script {
-              checkoutRepos(BRANCH_NAME)
-              // mergeRelease(branch)
-            }
-          }
-        }
-        stage('Finish Release') {
-          when {
             expression { params.action_type == 'merge_release' }
             beforeAgent true
           }
           steps {
             script {
               checkoutRepos(BRANCH_NAME)
-              // if (!params.extra_branch.isEmpty()) {
-              //   finishRelease(branch, params.extra_branch)
-              // } else {
-              //   finishRelease(branch)
-              // }
+              mergeRelease(BRANCH_NAME)
+            }
+          }
+        }
+        stage('Finish Release') {
+          when {
+            expression { params.action_type == 'finish_release' }
+            beforeAgent true
+          }
+          steps {
+            script {
+              checkoutRepos(BRANCH_NAME)
+              finishRelease(BRANCH_NAME, params.extra_branch)
             }
           }
         }
@@ -162,6 +158,9 @@ def checkoutRepo(Map repo, String branch = 'master') {
         else
           pushd $REPO
           git fetch -p
+          if [ $(git branch -a | grep $BRANCH | wc -c) -eq 0 ]; then
+            exit 0
+          fi
           git reset --hard origin/$BRANCH
           git pull -f origin $BRANCH
           popd      
@@ -202,6 +201,61 @@ def createBranch(Map repo, String branch, String baseBranch) {
   )
 }
 
+def mergeBranch(Map repo, String branch, ArrayList baseBranches) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  env.BASE_BRANCHES = baseBranches.join(' ')
+  env.BASE_BRANCHES_SIZE = baseBranches.size()
+  return sh (
+    label: "${REPO}: merge ${BRANCH} into ${BASE_BRANCHES}",
+    script: '''#!/bin/bash -xe
+      if [ $(git branch -a | grep $BRANCH | wc -c) -eq 0 ]; then
+        exit 0
+      fi
+      merged=0
+      for base in $BASE_BRANCHES; do
+        git checkout -f $BRANCH
+        git pull --ff-only origin $BRANCH
+        gh pr create \
+          --repo $REPO \
+          --base $base \
+          --head $BRANCH \
+          --title "Merge branch $BRANCH into $base" \
+          --fill || \
+        true
+        git checkout $base
+        git pull --ff-only origin $base
+        git merge $BRANCH \
+          --no-edit --no-ff \
+          -m "Merge branch $BRANCH into $base" || \
+        continue
+        git push origin $base
+        ((++merged))
+      done
+      if [ $merged -ne $BASE_BRANCHES_SIZE ]; then
+        exit 2
+      fi
+    ''',
+    returnStatus: true
+  )
+}
+
+def deleteBranch(Map repo, String branch) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  return sh (
+    label: "${REPO}: delete ${BRANCH}",
+    script: '''#!/bin/bash -xe
+      if [ $(git branch -a | grep $BRANCH | wc -c) -eq 0 ]; then
+        exit 0
+      fi
+      git branch -D $BRANCH
+      git push --delete origin $BRANCH
+    ''',
+    returnStatus: true
+  )
+}
+
 def protectBranch(Map repo, String branch) {
   env.REPO = repo.owner + '/' + repo.name
   env.BRANCH = branch
@@ -223,6 +277,16 @@ def protectBranch(Map repo, String branch) {
   )
 }
 
+def unprotectBranch(Map repo, String branch) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  return sh (
+    label: "${REPO}: unprotect ${BRANCH}",
+    script: 'gh api -X DELETE repos/$REPO/branches/$BRANCH/protection',
+    returnStatus: true
+  )
+}
+
 def startRelease(String branch, String baseBranch, Boolean protect) {
   stats.success = 0
   stats.total = reposList.size()
@@ -230,10 +294,10 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
     dir (repo.owner + '/' + repo.name) {
       Integer retC = createBranch(repo, branch, baseBranch)
       if (!protect) {
-        setStats(retC == 0)
+        fillStats(retC == 0)
       } else {
         Integer retP = protectBranch(repo, branch)
-        setStats(retC == 0, retP == 0)
+        fillStats(retC == 0, retP == 0)
       }
     }
   }
@@ -244,7 +308,50 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
   if (stats.success > 0) sendNotification()
 }
 
-def setStats(Boolean action, Boolean protect = false) {
+def mergeRelease(String branch)
+{
+  stats.success = 0
+  stats.total = reposList.size()
+  for (repo in reposList) {
+    dir (repo.owner + '/' + repo.name) {
+      Integer retM = mergeBranch(repo, branch, ['master'])
+      fillStats(retM == 0)
+    }
+  }
+  setBuildStatus()
+  notifyMessage = "Branch `${branch}` merged into `master`"
+  notifyMessage += " \\[${stats.success}/${stats.total}]\n"
+  notifyMessage += stats.list
+  if (stats.success > 0) sendNotification()
+}
+
+def finishRelease(String branch, String extraBranch = '')
+{
+  stats.success = 0
+  stats.total = reposList.size()
+  ArrayList baseBranches = ['master', 'develop']
+  if (!extraBranch.isEmpty()) baseBranches.add(extraBranch)
+  for (repo in reposList) {
+    dir (repo.owner + '/' + repo.name) {
+      Integer retM = mergeBranch(repo, branch, baseBranches)
+      if (retM != 0) {
+        fillStats(retM == 0)
+      } else if (retM == 0) {
+        Integer retP = unprotectBranch(repo, branch)
+        Integer retD = deleteBranch(repo, branch)
+        fillStats(retD == 0, retP != 0)
+      }
+    }
+  }
+  setBuildStatus()
+  String tgBranches = baseBranches.collect({"`$it`"}).join(', ')
+  notifyMessage = "Branch `${branch}` merged into ${tgBranches}"
+  notifyMessage += " \\[${stats.success}/${stats.total}]\n"
+  notifyMessage += stats.list
+  if (stats.success > 0) sendNotification()
+}
+
+def fillStats(Boolean action, Boolean protect = false) {
   if (action) stats.success++
   if (action) stats.list += '✅' else stats.list += '❎'
   if (protect) stats.list += '🛡'
