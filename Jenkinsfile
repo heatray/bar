@@ -104,19 +104,19 @@ pipeline {
         }
         stage('Merge Release') {
           when {
-            expression { params.action_type == 'finish_release' }
+            expression { params.action_type == 'merge_release' }
             beforeAgent true
           }
           steps {
             script {
               checkoutRepos(BRANCH_NAME)
-              // mergeRelease(branch)
+              mergeRelease(branch)
             }
           }
         }
         stage('Finish Release') {
           when {
-            expression { params.action_type == 'merge_release' }
+            expression { params.action_type == 'finish_release' }
             beforeAgent true
           }
           steps {
@@ -202,6 +202,44 @@ def createBranch(Map repo, String branch, String baseBranch) {
   )
 }
 
+def mergeBranch(Map repo, String branch, ArrayList baseBranches) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  env.BASE_BRANCHES = baseBranches.join(' ')
+  return sh (
+    label: "${REPO}: merge ${BRANCH} into ${BASE_BRANCHES}",
+    script: '''#!/bin/bash -xe
+      if [ $(git branch -a | grep '$BRANCH' | wc -c) -eq 0 ]; then
+        exit 0
+      fi
+      merged=0
+      for base in ${BASE_BRANCHES[*]}; do
+        git checkout -f $BRANCH
+        git pull --ff-only origin $BRANCH
+        gh pr create \
+          --repo $REPO \
+          --base $base \
+          --head $BRANCH \
+          --title "Merge branch $BRANCH into \$base\" \
+          --fill || \
+        true
+        git checkout $base
+        git pull --ff-only origin $base
+        git merge $BRANCH \
+          --no-edit --no-ff \
+          -m \"Merge branch $BRANCH into $base\" || \
+        continue
+        git push origin $base
+        ((++merged))
+      done
+      if [ $merged -ne ${#BASE_BRANCHES[@]} ]; then
+        exit 2
+      fi
+    ''',
+    returnStatus: true
+  )
+}
+
 def protectBranch(Map repo, String branch) {
   env.REPO = repo.owner + '/' + repo.name
   env.BRANCH = branch
@@ -239,6 +277,23 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
   }
   setBuildStatus()
   notifyMessage = "Branch `${branch}` created from `${baseBranch}`"
+  notifyMessage += " \\[${stats.success}/${stats.total}]\n"
+  notifyMessage += stats.list
+  if (stats.success > 0) sendNotification()
+}
+
+def mergeRelease(String branch)
+{
+  stats.success = 0
+  stats.total = getReposList().size()
+  for (repo in reposList) {
+    dir (repo.dir) {
+      Integer retM = mergeBranch(branch, ['master'], repo)
+      setStats(retM == 0)
+    }
+  }
+  setBuildStatus()
+  notifyMessage = "Branch `${branch}` merged into `master`"
   notifyMessage += " \\[${stats.success}/${stats.total}]\n"
   notifyMessage += stats.list
   if (stats.success > 0) sendNotification()
