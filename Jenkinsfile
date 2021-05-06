@@ -87,6 +87,11 @@ pipeline {
           }
           // utils = load 'utils.groovy'
           branch = defaults.release_type + '/v' + params.vesion
+          stats = [
+            success: 0
+            total: 0
+            list: ''
+          ]
           notifyMessage = ''
         }
       }
@@ -239,8 +244,8 @@ def protectBranch(Map repo, String branch) {
 }
 
 def startRelease(String branch, String baseBranch, Boolean protect) {
-  Integer success = 0
-  Integer total = reposList.size()
+  stats.success = 0
+  stats.total = reposList.size()
   for (repo in reposList) {
     dir (repo.owner + '/' + repo.name) {
       Integer retC = createBranch(repo, branch, baseBranch)
@@ -253,26 +258,26 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
     }
   }
   setBuildStatus(success, total)
-  notifyMessage = "Branch `${branch}` created from `${baseBranch}` \\[${success}/${total}\\]\n" + notifyMessage
+  notifyMessage = "Branch `${branch}` created from `${baseBranch}` \\[${success}/${total}\\]\n" + stats.list
   if (success > 0) sendNotification()
 }
 
 def regStat(Boolean ret) {
   if (ret) {
-    notifyMessage += "✅"
-    success++
+    stats.list += "✅"
+    stats.success++
   } else {
-    notifyMessage += "❎"
+    stats.list += "❎"
   }
-  notifyMessage += " ${repo}\n"
+  stats.list += " ${repo}\n"
 }
 
-def setBuildStatus(Integer success, Integer total) {
-  if (success == 0) {
+def setBuildStatus() {
+  if (stats.success == 0) {
     currentBuild.result = "FAILURE"
-  } else if (success != total) {
+  } else if (stats.success != stats.total) {
     currentBuild.result = "UNSTABLE"
-  } else if (success == total) {
+  } else if (stats.success == stats.total) {
     currentBuild.result = "SUCCESS"
   }
 }
