@@ -88,8 +88,8 @@ pipeline {
           // utils = load 'utils.groovy'
           branch = defaults.release_type + '/v' + params.vesion
           stats = [
-            success: 0
-            total: 0
+            success: 0,
+            total: 0,
             list: ''
           ]
           notifyMessage = ''
