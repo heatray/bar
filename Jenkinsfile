@@ -202,6 +202,7 @@ def mergeBranch(Map repo, String branch, ArrayList baseBranches) {
   env.REPO = repo.owner + '/' + repo.name
   env.BRANCH = branch
   env.BASE_BRANCHES = baseBranches.join(' ')
+  env.BASE_BRANCHES_SIZE = baseBranches.size()
   return sh (
     label: "${REPO}: merge ${BRANCH} into ${BASE_BRANCHES}",
     script: '''#!/bin/bash -xe
@@ -228,7 +229,7 @@ def mergeBranch(Map repo, String branch, ArrayList baseBranches) {
         git push origin $base
         ((++merged))
       done
-      if [ $merged -ne ${#BASE_BRANCHES[@]} ]; then
+      if [ $merged -ne $BASE_BRANCHES_SIZE ]; then
         exit 2
       fi
     ''',
