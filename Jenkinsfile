@@ -122,11 +122,7 @@ pipeline {
           steps {
             script {
               checkoutRepos(BRANCH_NAME)
-              // if (!params.extra_branch.isEmpty()) {
-              //   finishRelease(branch, params.extra_branch)
-              // } else {
-              //   finishRelease(branch)
-              // }
+              finishRelease(BRANCH_NAME, params.extra_branch)
             }
           }
         }
@@ -240,6 +236,22 @@ def mergeBranch(Map repo, String branch, ArrayList baseBranches) {
   )
 }
 
+def deleteBranch(Map repo, String branch) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  return sh (
+    label: "${REPO}: delete ${BRANCH}",
+    script: '''#!/bin/bash -xe
+      if [ $(git branch -a | grep $BRANCH | wc -c) -eq 0 ]; then
+        exit 0
+      fi
+      git branch -D $BRANCH
+      git push --delete origin $BRANCH
+    ''',
+    returnStatus: true
+  )
+}
+
 def protectBranch(Map repo, String branch) {
   env.REPO = repo.owner + '/' + repo.name
   env.BRANCH = branch
@@ -261,6 +273,16 @@ def protectBranch(Map repo, String branch) {
   )
 }
 
+def unprotectBranch(Map repo, String branch) {
+  env.REPO = repo.owner + '/' + repo.name
+  env.BRANCH = branch
+  return sh (
+    label: "${REPO}: unprotect ${BRANCH}",
+    script: 'gh api -X DELETE repos/$REPO/branches/$BRANCH/protection',
+    returnStatus: true
+  )
+}
+
 def startRelease(String branch, String baseBranch, Boolean protect) {
   stats.success = 0
   stats.total = reposList.size()
@@ -268,10 +290,10 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
     dir (repo.owner + '/' + repo.name) {
       Integer retC = createBranch(repo, branch, baseBranch)
       if (!protect) {
-        setStats(retC == 0)
+        fillStats(retC == 0)
       } else {
         Integer retP = protectBranch(repo, branch)
-        setStats(retC == 0, retP == 0)
+        fillStats(retC == 0, retP == 0)
       }
     }
   }
@@ -289,7 +311,7 @@ def mergeRelease(String branch)
   for (repo in reposList) {
     dir (repo.owner + '/' + repo.name) {
       Integer retM = mergeBranch(repo, branch, ['master'])
-      setStats(retM == 0)
+      fillStats(retM == 0)
     }
   }
   setBuildStatus()
@@ -299,7 +321,31 @@ def mergeRelease(String branch)
   if (stats.success > 0) sendNotification()
 }
 
-def setStats(Boolean action, Boolean protect = false) {
+def finishRelease(String branch, String extraBranch = '')
+{
+  stats.success = 0
+  stats.total = reposList.size()
+  ArrayList baseBranches = ['master', 'develop']
+  if (!extraBranch.isEmpty()) baseBranches.add(extraBranch)
+  for (repo in reposList) {
+    dir (repo.owner + '/' + repo.name) {
+      Integer retM = mergeBranch(repo, branch, baseBranches)
+      if (retM == 0) {
+        Integer retU = unprotectBranch(repo, branch)
+        Integer retD = deleteBranch(repo, branch)
+        fillStats(retD == 0)
+      }
+    }
+  }
+  setBuildStatus()
+  String tgBranches = baseBranches.collect({"`$it`"}).join(', ')
+  notifyMessage = "Branch `${branch}` merged into ${tgBranches}"
+  notifyMessage += " \\[${stats.success}/${stats.total}]\n"
+  notifyMessage += stats.list
+  if (stats.success > 0) sendNotification()
+}
+
+def fillStats(Boolean action, Boolean protect = false) {
   if (action) stats.success++
   if (action) stats.list += '✅' else stats.list += '❎'
   if (protect) stats.list += '🛡'
