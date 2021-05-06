@@ -1,5 +1,7 @@
 defaults = [
-  action_type: [ 'none', 'print_branches' ]
+  action_type: [ 'none', 'print_branches' ],
+  version: '',
+  protect_branch: false
 ]
 
 isMaster  = BRANCH_NAME == 'master'
@@ -7,17 +9,17 @@ isDevelop = BRANCH_NAME == 'develop'
 isHotfix  = BRANCH_NAME.startsWith('hotfix')
 isRelease = BRANCH_NAME.startsWith('release')
 
-if (BRANCH_NAME == 'master') {
+if (isMaster) {
   defaults.release_type = 'hotfix'
-} else if (BRANCH_NAME == 'develop') {
+} else if (isDevelop) {
   defaults.release_type = 'release'
 }
 
-if (BRANCH_NAME == 'master' || BRANCH_NAME == 'develop') {
+if (isMaster || isDevelop) {
   defaults.action_type.add('start_release')
-}
-
-if (BRANCH_NAME.startsWith('hotfix') || BRANCH_NAME.startsWith('release')) {
+  defaults.version = '0.0.0'
+  defaults.protect_branch = true
+} else if (isHotfix || isRelease) {
   defaults.action_type.add('merge_release')
   defaults.action_type.add('finish_release')
   defaults.action_type.add('unprotect_release')
@@ -43,13 +45,13 @@ pipeline {
     )
     string (
       name:         'vesion',
-      description:  'Release version',
-      defaultValue: '0.0.0'
+      description:  'Release version (for start_release only)',
+      defaultValue: defaults.version
     )
     booleanParam (
       name:         'protect_branch',
       description:  'Protect branch (for start_release only)',
-      defaultValue: true
+      defaultValue: defaults.protect_branch
     )
     string (
       name:         'extra_branch',
@@ -76,7 +78,7 @@ pipeline {
         }
       }
     }
-    stage('Flow') {
+    stage('Stages') {
       parallel {
         stage('Print Branches') {
           when {
