@@ -285,7 +285,7 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
 def mergeRelease(String branch)
 {
   stats.success = 0
-  stats.total = getReposList().size()
+  stats.total = reposList.size()
   for (repo in reposList) {
     dir (repo.dir) {
       Integer retM = mergeBranch(branch, ['master'], repo)
