@@ -209,7 +209,7 @@ def mergeBranch(Map repo, String branch, ArrayList baseBranches) {
   return sh (
     label: "${REPO}: merge ${BRANCH} into ${BASE_BRANCHES}",
     script: '''#!/bin/bash -xe
-      if [ $(git branch -a | grep '$BRANCH' | wc -c) -eq 0 ]; then
+      if [ $(git branch -a | grep $BRANCH | wc -c) -eq 0 ]; then
         exit 0
       fi
       merged=0
