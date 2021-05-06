@@ -250,10 +250,10 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
     dir (repo.owner + '/' + repo.name) {
       Integer retC = createBranch(repo, branch, baseBranch)
       if (!protect) {
-        regStat(retC == 0)
+        setStats(retC == 0)
       } else {
         Integer retP = protectBranch(repo, branch)
-        regStat(retC == 0, retP == 0)
+        setStats(retC == 0, retP == 0)
       }
     }
   }
@@ -264,7 +264,7 @@ def startRelease(String branch, String baseBranch, Boolean protect) {
   if (stats.success > 0) sendNotification()
 }
 
-def regStat(Boolean action, Boolean protect = false) {
+def setStats(Boolean action, Boolean protect = false) {
   if (action) {
     stats.success++
     stats.list += '✅'
