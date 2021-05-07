@@ -226,7 +226,7 @@ def checkoutRepo(String repo, String branch = 'master') {
     label: "${repo}: checkout",
     script: """
       git rev-parse --absolute-git-dir || true
-      if [ \$(git rev-parse --is-inside-work-tree) = 'true' ]; then
+      if [ \$(GIT_DIR=.git git rev-parse --is-inside-work-tree) = 'true' ]; then
         git fetch -p
         if ! git ls-remote --refs --exit-code . origin/${branch}; then
           echo "Remote branch ${branch} doesn't exist."
@@ -238,6 +238,7 @@ def checkoutRepo(String repo, String branch = 'master') {
         rm -rfv ./*
         git clone -b ${branch} git@github.com:${repo}.git .
       fi
+      git rev-parse --absolute-git-dir || true
     """
   )
 }
