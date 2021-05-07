@@ -1,5 +1,5 @@
 defaults = [
-  action_type: [ 'print_branches' ],
+  action_type: ['print_branches'],
   version: '',
   protect_branch: false
 ]
@@ -9,25 +9,22 @@ isDevelop = BRANCH_NAME == 'develop'
 isHotfix  = BRANCH_NAME.startsWith('hotfix')
 isRelease = BRANCH_NAME.startsWith('release')
 
-if (isMaster) {
-  defaults.release_type = 'hotfix'
-} else if (isDevelop) {
-  defaults.release_type = 'release'
-}
-
 if (isMaster || isDevelop) {
   defaults.action_type.add('start_release')
   defaults.version = '0.0.0'
   defaults.protect_branch = true
+  if (isMaster) {
+    defaults.release_type = 'hotfix'
+  } else if (isDevelop) {
+    defaults.release_type = 'release'
+  }
 } else if (isHotfix || isRelease) {
-  defaults.action_type.add('merge_release')
-  defaults.action_type.add('finish_release')
-  defaults.action_type.add('unprotect_release')
+  defaults.action_type.addAll(['merge_release', 'finish_release', 'unprotect_release'])
 }
 
 reposList = [
-  [ owner: 'heatray', name: 'foo', dir: 'foo' ],
-  [ owner: 'heatray', name: 'bar', dir: 'bar' ]
+  [owner: 'heatray', name: 'foo', dir: 'foo'],
+  [owner: 'heatray', name: 'bar', dir: 'bar']
 ]
 
 pipeline {
@@ -93,8 +90,11 @@ pipeline {
           }
           steps {
             script {
-              echo "Print Branches"
-              // printReposBranches()
+              for (i in reposList) {
+                String repo = i.owner + '/' + i.name
+                Integer ret = printBranches(repo)
+                fillStats(repo, ret == 0)
+              }
             }
           }
         }
@@ -127,9 +127,6 @@ pipeline {
                   }
                 }
               }
-
-              setBuildStatus()
-              sendNotification()
             }
           }
         }
@@ -150,9 +147,6 @@ pipeline {
                   fillStats(repo, retM == 0)
                 }
               }
-
-              setBuildStatus()
-              sendNotification()
             }
           }
         }
@@ -180,9 +174,6 @@ pipeline {
                   }
                 }
               }
-
-              setBuildStatus()
-              sendNotification()
             }
           }
         }
@@ -198,11 +189,24 @@ pipeline {
                 Integer ret = unprotectBranch(repo, curBranch)
                 fillStats(repo, ret == 0)
               }
-
-              setBuildStatus()
-              println stats.list
             }
           }
+        }
+      }
+    }
+  }
+  post {
+    success {
+      script {
+        setBuildStatus()
+        if ((params.action_type == 'start_release' ||
+          params.action_type == 'merge_release' ||
+          params.action_type == 'finish_release') &&
+          params.notify && stats.success > 0) {
+          sendNotification()
+        } else if (params.action_type == 'print_branches' ||
+          params.action_type == 'unprotect_release') {
+          println stats.list
         }
       }
     }
@@ -317,6 +321,17 @@ def protectBranch(String repo, String branch) {
   )
 }
 
+def printBranches(String repo) {
+  return sh (
+    label: "${repo}: branches list",
+    script: """
+      gh api -X GET repos/${repo}/branches?per_page=100 | \
+      jq -c '.[] | { name, protected }'
+    """,
+    returnStatus: true
+  )
+}
+
 def unprotectBranch(String repo, String branch) {
   return sh (
     label: "${repo}: unprotect ${branch}",
@@ -327,9 +342,9 @@ def unprotectBranch(String repo, String branch) {
 
 def fillStats(String repo, Boolean primary, Boolean secondary = false) {
   if (primary) stats.success++
-  if (primary) stats.list += '✅' else stats.list += '❎'
+  if (primary) stats.list += '\n✅' else stats.list += '\n❎'
   if (secondary) stats.list += '🛡'
-  stats.list += " ${repo}\n"
+  stats.list += " ${repo}"
 }
 
 def setBuildStatus() {
@@ -357,18 +372,16 @@ def sendNotification() {
       text += baseBranches.collect({"`$it`"}).join(', ')
       break
   }
-  text += " \\[${stats.success}/${stats.total}]\n${stats.list}"
+  text += " \\[${stats.success}/${stats.total}]${stats.list}"
 
-  if (params.notify && stats.success > 0) {
-    withCredentials([string(
-      credentialsId: 'telegram-bot-token',
-      variable: 'TELEGRAM_TOKEN'
-    )]) {
-      sh label: "Send Telegram Notification", script: "curl -X POST -s -S \
-        -d parse_mode=markdown \
-        -d chat_id=${chatId} \
-        --data-urlencode text='${text}' \
-        https://api.telegram.org/bot\$TELEGRAM_TOKEN/sendMessage"
-    }
+  withCredentials([string(
+    credentialsId: 'telegram-bot-token',
+    variable: 'TELEGRAM_TOKEN'
+  )]) {
+    sh label: "Send Telegram Notification", script: "curl -X POST -s -S \
+      -d parse_mode=markdown \
+      -d chat_id=${chatId} \
+      --data-urlencode text='${text}' \
+      https://api.telegram.org/bot\$TELEGRAM_TOKEN/sendMessage"
   }
 }
