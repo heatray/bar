@@ -115,7 +115,7 @@ pipeline {
 
               for (i in reposList) {
                 repo = i.owner + '/' + i.name
-                dir (repo) {
+                dir ('repos/' + repo) {
                   checkoutRepo(repo, baseBranch)
                   Integer retC = createBranch(repo, branch, baseBranch)
                   if (!params.protect_branch) {
@@ -148,7 +148,7 @@ pipeline {
 
               for (i in reposList) {
                 repo = i.owner + '/' + i.name
-                dir (repo) {
+                dir ('repos/' + repo) {
                   checkoutRepo(repo, branch)
                   Integer retM = mergeBranch(repo, branch, [baseBranch])
                   fillStats(repo, retM == 0)
@@ -177,7 +177,7 @@ pipeline {
 
               for (i in reposList) {
                 repo = i.owner + '/' + i.name
-                dir (repo) {
+                dir ('repos/' + repo) {
                   checkoutRepo(repo, branch)
                   Integer retM = mergeBranch(repo, branch, baseBranches)
                   if (retM != 0) {
@@ -225,6 +225,7 @@ def checkoutRepo(String repo, String branch = 'master') {
   sh (
     label: "${repo}: checkout",
     script: """
+      git rev-parse --absolute-git-dir || true
       if [ \$(git rev-parse --is-inside-work-tree) = 'true' ]; then
         git fetch -p
         if ! git ls-remote --refs --exit-code . origin/${branch}; then
