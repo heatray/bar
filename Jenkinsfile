@@ -81,7 +81,6 @@ pipeline {
             success: 0,
             total: reposList.size()
           ]
-          notifyMessage = ''
         }
       }
     }
@@ -106,22 +105,25 @@ pipeline {
           }
           steps {
             script {
-              String repo
-              String branch = defaults.release_type + '/v' + params.vesion
-              String baseBranch = BRANCH_NAME
-
-              stats.branch = branch
-              stats.baseBranches = [baseBranch]
+              stats.branch = defaults.release_type + '/v' + params.vesion
+              stats.baseBranches = [BRANCH_NAME]
 
               for (i in reposList) {
-                repo = i.owner + '/' + i.name
+                String repo = i.owner + '/' + i.name
                 dir ('repos/' + repo) {
-                  checkoutRepo(repo, baseBranch)
-                  Integer retC = createBranch(repo, branch, baseBranch)
+                  checkoutRepo(repo)
+                  if (sh (
+                    script: "git ls-remote --exit-code git@github.com:${repo}.git develop",
+                    returnStatus: true
+                  ) != 0) {
+                    Integer retD = createBranch(repo, 'develop', 'master')
+                    if (retD != 0) error("Can't create develop branch")
+                  }
+                  Integer retC = createBranch(repo, stats.branch, baseBranches[0])
                   if (!params.protect_branch) {
                     fillStats(repo, retC == 0)
                   } else {
-                    Integer retP = protectBranch(repo, branch)
+                    Integer retP = protectBranch(repo, stats.branch)
                     fillStats(repo, retC == 0, retP == 0)
                   }
                 }
@@ -139,18 +141,14 @@ pipeline {
           }
           steps {
             script {
-              String repo
-              String branch = BRANCH_NAME
-              String baseBranch = 'master'
-
-              stats.branch = branch
-              stats.baseBranches = [baseBranch]
+              stats.branch = BRANCH_NAME
+              stats.baseBranches = ['master']
 
               for (i in reposList) {
-                repo = i.owner + '/' + i.name
+                String repo = i.owner + '/' + i.name
                 dir ('repos/' + repo) {
-                  checkoutRepo(repo, branch)
-                  Integer retM = mergeBranch(repo, branch, [baseBranch])
+                  checkoutRepo(repo)
+                  Integer retM = mergeBranch(repo, stats.branch, stats.baseBranches)
                   fillStats(repo, retM == 0)
                 }
               }
@@ -167,24 +165,20 @@ pipeline {
           }
           steps {
             script {
-              String repo
-              String branch = BRANCH_NAME
-              ArrayList baseBranches = ['master', 'develop']
-              if (!extraBranch.isEmpty()) baseBranches.add(extraBranch)
-
-              stats.branch = branch
-              stats.baseBranches = baseBranches
+              stats.branch = BRANCH_NAME
+              stats.baseBranches = ['master', 'develop']
+              if (!extraBranch.isEmpty()) stats.baseBranches.add(extraBranch)
 
               for (i in reposList) {
-                repo = i.owner + '/' + i.name
+                String repo = i.owner + '/' + i.name
                 dir ('repos/' + repo) {
-                  checkoutRepo(repo, branch)
-                  Integer retM = mergeBranch(repo, branch, baseBranches)
+                  checkoutRepo(repo)
+                  Integer retM = mergeBranch(repo, stats.branch, stats.baseBranches)
                   if (retM != 0) {
                     fillStats(repo, retM == 0)
                   } else if (retM == 0) {
-                    Integer retP = unprotectBranch(repo, branch)
-                    Integer retD = deleteBranch(repo, branch)
+                    Integer retP = unprotectBranch(repo, stats.branch)
+                    Integer retD = deleteBranch(repo, stats.branch)
                     fillStats(repo, retD == 0, retP != 0)
                   }
                 }
@@ -202,12 +196,11 @@ pipeline {
           }
           steps {
             script {
-              String repo
-              String branch = BRANCH_NAME
+              stats.branch = BRANCH_NAME
 
               for (i in reposList) {
-                repo = i.owner + '/' + i.name
-                Integer ret = unprotectBranch(repo, branch)
+                String repo = i.owner + '/' + i.name
+                Integer ret = unprotectBranch(repo, stats.branch)
                 fillStats(repo, ret == 0)
               }
 
@@ -225,20 +218,18 @@ def checkoutRepo(String repo, String branch = 'master') {
   sh (
     label: "${repo}: checkout",
     script: """
-      git rev-parse --absolute-git-dir || true
       if [ "\$(GIT_DIR=.git git rev-parse --is-inside-work-tree)" = 'true' ]; then
-        git fetch -p
+        git fetch --all --prune
         if ! git ls-remote --refs --exit-code . origin/${branch}; then
           echo "Remote branch ${branch} doesn't exist."
           exit 0
         fi
         git reset --hard origin/${branch}
-        git pull -f origin ${branch}
+        git branch -vv
       else
         rm -rfv ./*
         git clone -b ${branch} git@github.com:${repo}.git .
       fi
-      git rev-parse --absolute-git-dir || true
     """
   )
 }
@@ -247,16 +238,12 @@ def createBranch(String repo, String branch, String baseBranch) {
   return sh (
     label: "${repo}: start ${branch}",
     script: """
-      if ! git ls-remote --refs --exit-code . origin/develop; then
-        git checkout -f master
-        git checkout -b develop
-        git push origin develop
-        git checkout -f ${baseBranch}
-      fi
       if git ls-remote --refs --exit-code . origin/${branch}; then
         echo "Remote branch ${branch} exist."
         exit 0
       fi
+      git reset --hard origin/${baseBranch}
+      git branch -vv
       git checkout -B ${branch}
       git push origin ${branch}
     """,
@@ -275,8 +262,8 @@ def mergeBranch(String repo, String branch, ArrayList baseBranches) {
       base_branches=(${baseBranches.join(' ')})
       merged=0
       for base in \${base_branches[*]}; do
-        git checkout -f ${branch}
-        git pull --ff-only origin ${branch}
+        git reset --hard origin/${branch}
+        git branch -vv
         gh pr create \
           --repo ${repo} \
           --base \$base \
