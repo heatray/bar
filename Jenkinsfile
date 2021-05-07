@@ -73,10 +73,10 @@ pipeline {
             checkout scm
           }
           // utils = load 'utils.groovy'
+          curBranch = BRANCH_NAME
+          newBranch = defaults.release_type + '/v' + params.vesion
+          baseBranches = []
           stats = [
-            repo: '',
-            branch: '',
-            baseBranches: [],
             list: '',
             success: 0,
             total: reposList.size()
@@ -105,8 +105,7 @@ pipeline {
           }
           steps {
             script {
-              stats.branch = defaults.release_type + '/v' + params.vesion
-              stats.baseBranches = [BRANCH_NAME]
+              baseBranches = [BRANCH_NAME]
 
               for (i in reposList) {
                 String repo = i.owner + '/' + i.name
@@ -119,11 +118,11 @@ pipeline {
                     Integer retD = createBranch(repo, 'develop', 'master')
                     if (retD != 0) error("Can't create develop branch")
                   }
-                  Integer retC = createBranch(repo, stats.branch, baseBranches[0])
+                  Integer retC = createBranch(repo, newBranch, baseBranches[0])
                   if (!params.protect_branch) {
                     fillStats(repo, retC == 0)
                   } else {
-                    Integer retP = protectBranch(repo, stats.branch)
+                    Integer retP = protectBranch(repo, newBranch)
                     fillStats(repo, retC == 0, retP == 0)
                   }
                 }
@@ -141,14 +140,13 @@ pipeline {
           }
           steps {
             script {
-              stats.branch = BRANCH_NAME
-              stats.baseBranches = ['master']
+              baseBranches = ['master']
 
               for (i in reposList) {
                 String repo = i.owner + '/' + i.name
                 dir ('repos/' + repo) {
                   checkoutRepo(repo)
-                  Integer retM = mergeBranch(repo, stats.branch, stats.baseBranches)
+                  Integer retM = mergeBranch(repo, curBranch, baseBranches)
                   fillStats(repo, retM == 0)
                 }
               }
@@ -165,20 +163,19 @@ pipeline {
           }
           steps {
             script {
-              stats.branch = BRANCH_NAME
-              stats.baseBranches = ['master', 'develop']
-              if (!extraBranch.isEmpty()) stats.baseBranches.add(extraBranch)
+              baseBranches = ['master', 'develop']
+              if (!extraBranch.isEmpty()) baseBranches.add(extraBranch)
 
               for (i in reposList) {
                 String repo = i.owner + '/' + i.name
                 dir ('repos/' + repo) {
                   checkoutRepo(repo)
-                  Integer retM = mergeBranch(repo, stats.branch, stats.baseBranches)
+                  Integer retM = mergeBranch(repo, curBranch, baseBranches)
                   if (retM != 0) {
                     fillStats(repo, retM == 0)
                   } else if (retM == 0) {
-                    Integer retP = unprotectBranch(repo, stats.branch)
-                    Integer retD = deleteBranch(repo, stats.branch)
+                    Integer retP = unprotectBranch(repo, curBranch)
+                    Integer retD = deleteBranch(repo, curBranch)
                     fillStats(repo, retD == 0, retP != 0)
                   }
                 }
@@ -196,11 +193,9 @@ pipeline {
           }
           steps {
             script {
-              stats.branch = BRANCH_NAME
-
               for (i in reposList) {
                 String repo = i.owner + '/' + i.name
-                Integer ret = unprotectBranch(repo, stats.branch)
+                Integer ret = unprotectBranch(repo, curBranch)
                 fillStats(repo, ret == 0)
               }
 
@@ -352,14 +347,14 @@ def sendNotification() {
   String text
   switch(params.action_type) {
     case 'start_release':
-      text = "Branch `${stats.branch}` created from `${stats.baseBranches[0]}`"
+      text = "Branch `${curBranch}` created from `${baseBranches[0]}`"
       break
     case 'merge_release':
-      text = "Branch `${stats.branch}` merged into `${stats.baseBranches[0]}`"
+      text = "Branch `${curBranch}` merged into `${baseBranches[0]}`"
       break
     case 'finish_release':
-      text = "Branch `${stats.branch}` merged into "
-      text += stats.baseBranches.collect({"`$it`"}).join(', ')
+      text = "Branch `${curBranch}` merged into "
+      text += baseBranches.collect({"`$it`"}).join(', ')
       break
   }
   text += " \\[${stats.success}/${stats.total}]\n${stats.list}"
