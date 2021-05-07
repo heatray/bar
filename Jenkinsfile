@@ -314,12 +314,10 @@ def deleteBranch(String repo, String branch) {
   )
 }
 
-def protectBranch(Map repo, String branch) {
-  env.REPO = repo.owner + '/' + repo.name
-  env.BRANCH = branch
+def protectBranch(String repo, String branch) {
   return sh (
-    label: "${REPO}: protect ${BRANCH}",
-    script: '''#!/bin/bash -xe
+    label: "${repo}: protect ${branch}",
+    script: """
       echo '{
         "required_status_checks": null,
         "enforce_admins": true,
@@ -329,18 +327,16 @@ def protectBranch(Map repo, String branch) {
           "teams": []
         }
       }' | \
-      gh api -X PUT repos/$REPO/branches/$BRANCH/protection --input -
-    ''',
+      gh api -X PUT repos/${repo}/branches/${branch}/protection --input -
+    """,
     returnStatus: true
   )
 }
 
-def unprotectBranch(Map repo, String branch) {
-  env.REPO = repo.owner + '/' + repo.name
-  env.BRANCH = branch
+def unprotectBranch(String repo, String branch) {
   return sh (
-    label: "${REPO}: unprotect ${BRANCH}",
-    script: 'gh api -X DELETE repos/$REPO/branches/$BRANCH/protection',
+    label: "${repo}: unprotect ${branch}",
+    script: "gh api -X DELETE repos/${repo}/branches/${branch}/protection",
     returnStatus: true
   )
 }
