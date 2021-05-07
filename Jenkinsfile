@@ -116,7 +116,7 @@ pipeline {
               for (i in reposList) {
                 repo = i.owner + '/' + i.name
                 dir (repo) {
-                  checkoutRepo(repo, branch)
+                  checkoutRepo(repo, baseBranch)
                   Integer retC = createBranch(repo, branch, baseBranch)
                   if (!params.protect_branch) {
                     fillStats(repo, retC == 0)
