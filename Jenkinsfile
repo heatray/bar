@@ -220,8 +220,8 @@ pipeline {
   post {
     success {
       script {
-        String icons = ''
         stats.repos.each { repo, status ->
+          String icons = ''
           switch(status.primary) {
             case 'skip':    icons += '🆗'; stats.success++; break
             case 'success': icons += '✅'; stats.success++; break
