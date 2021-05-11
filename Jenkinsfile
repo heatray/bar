@@ -98,7 +98,7 @@ pipeline {
               Boolean printed
               stats.repos.each { repo, status ->
                 printed = printBranches(repo)
-                status.primary = (printed) : 'success' ? 'failure'
+                status.primary = (printed) ? 'success' : 'failure'
               }
             }
           }
@@ -124,7 +124,7 @@ pipeline {
 
                   if (!exists) {
                     created = createBranch(repo, newBranch, baseBranches[0])
-                    status.primary = (created) : 'success' ? 'failure'
+                    status.primary = (created) ? 'success' : 'failure'
                   } else {
                     echo "Branch already ${newBranch} exists."
                     status.primary = 'skip'
@@ -132,7 +132,7 @@ pipeline {
 
                   if (params.protect_branch) {
                     locked = protectBranch(repo, newBranch)
-                    status.secondary = (locked) : 'lock' ? ''
+                    status.secondary = (locked) ? 'lock' : ''
                   }
                 }
               }
@@ -155,7 +155,7 @@ pipeline {
                   if (exists) {
                     checkoutRepo(repo)
                     merged = mergeBranch(repo, curBranch, baseBranches)
-                    status.primary = (merged) : 'success' ? 'failure'
+                    status.primary = (merged) ? 'success' : 'failure'
                   } else {
                     echo "Branch doesn't ${curBranch} exist."
                     status.primary = 'skip'
@@ -184,11 +184,11 @@ pipeline {
                   if (exists) {
                     checkoutRepo(repo)
                     merged = mergeBranch(repo, curBranch, baseBranches)
-                    status.primary = (merged) : 'success' ? 'failure'
+                    status.primary = (merged) ? 'success' : 'failure'
                     if (merged) {
                       unprotectBranch(repo, curBranch)
                       deleted = deleteBranch(repo, curBranch)
-                      status.secondary = (deleted) : 'delete' ? ''
+                      status.secondary = (deleted) ? 'delete' : ''
                     }
                   } else {
                     echo "Branch doesn't ${curBranch} exist."
@@ -209,7 +209,7 @@ pipeline {
               Boolean unlock
               stats.repos.each { repo, status ->
                 unlock = unprotectBranch(repo, curBranch)
-                status.primary = (unlock) : 'success' ? 'failure'
+                status.primary = (unlock) ? 'success' : 'failure'
               }
             }
           }
