@@ -302,7 +302,7 @@ def createBranch(String repo, String branch, String baseBranch) {
 }
 
 def mergeBranch(String repo, String branch, ArrayList baseBranches) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: merge ${branch} into ${baseBranches.join(' ')}",
     script: """#!/bin/bash -xe
       git checkout ${branch}
@@ -332,7 +332,9 @@ def mergeBranch(String repo, String branch, ArrayList baseBranches) {
       [[ \$merged -ne \${#base_branches[@]} ]] && exit 2
     """,
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def deleteBranch(String repo, String branch) {
