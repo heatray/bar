@@ -73,11 +73,16 @@ pipeline {
           curBranch = BRANCH_NAME
           newBranch = defaults.release_type + '/v' + params.vesion
           baseBranches = []
+          // reposList = utils.getReposList()
           stats = [
+            repos: [:],
             list: '',
             success: 0,
             total: reposList.size()
           ]
+          reposList.each {
+            stats.repos.put(it.owner + '/' + it.name, [:])
+          }
         }
       }
     }
@@ -90,10 +95,10 @@ pipeline {
           }
           steps {
             script {
-              for (i in reposList) {
-                String repo = i.owner + '/' + i.name
-                Integer ret = printBranches(repo)
-                fillStats(repo, ret == 0)
+              Boolean printed
+              stats.repos.each { repo, status ->
+                printed = printBranches(repo)
+                status.primary = (printed) ? 'success' : 'failure'
               }
             }
           }
@@ -106,24 +111,27 @@ pipeline {
           steps {
             script {
               baseBranches = [BRANCH_NAME]
+              Boolean created
+              Boolean locked
 
-              for (i in reposList) {
-                String repo = i.owner + '/' + i.name
+              stats.repos.each { repo, status ->
                 dir ('repos/' + repo) {
                   checkoutRepo(repo)
-                  if (sh (
-                    script: "git ls-remote --exit-code git@github.com:${repo}.git develop",
-                    returnStatus: true
-                  ) != 0) {
-                    Integer retD = createBranch(repo, 'develop', 'master')
-                    if (retD != 0) error("Can't create develop branch")
-                  }
-                  Integer retC = createBranch(repo, newBranch, baseBranches[0])
-                  if (!params.protect_branch) {
-                    fillStats(repo, retC == 0)
+                  if (!checkRemoteBranch(repo, 'develop')
+                    && !createBranch(repo, 'develop', 'master'))
+                    error("Can't create develop branch.")
+
+                  if (!checkRemoteBranch(repo, newBranch)) {
+                    created = createBranch(repo, newBranch, baseBranches[0])
+                    status.primary = (created) ? 'success' : 'failure'
                   } else {
-                    Integer retP = protectBranch(repo, newBranch)
-                    fillStats(repo, retC == 0, retP == 0)
+                    echo "Branch already ${newBranch} exists."
+                    status.primary = 'skip'
+                  }
+
+                  if (params.protect_branch) {
+                    locked = protectBranch(repo, newBranch)
+                    status.secondary = (locked) ? 'lock' : ''
                   }
                 }
               }
@@ -138,13 +146,18 @@ pipeline {
           steps {
             script {
               baseBranches = ['master']
+              Boolean merged
 
-              for (i in reposList) {
-                String repo = i.owner + '/' + i.name
+              stats.repos.each { repo, status ->
                 dir ('repos/' + repo) {
-                  checkoutRepo(repo)
-                  Integer retM = mergeBranch(repo, curBranch, baseBranches)
-                  fillStats(repo, retM == 0)
+                  if (checkRemoteBranch(repo, curBranch)) {
+                    checkoutRepo(repo)
+                    merged = mergeBranch(repo, curBranch, baseBranches)
+                    status.primary = (merged) ? 'success' : 'failure'
+                  } else {
+                    echo "Branch doesn't ${curBranch} exist."
+                    status.primary = 'skip'
+                  }
                 }
               }
             }
@@ -158,19 +171,27 @@ pipeline {
           steps {
             script {
               baseBranches = ['master', 'develop']
-              if (!extraBranch.isEmpty()) baseBranches.add(extraBranch)
+              if (!params.extra_branch.isEmpty())
+                baseBranches.add(params.extra_branch)
+              Boolean unlocked
+              Boolean merged
+              Boolean deleted
 
-              for (i in reposList) {
-                String repo = i.owner + '/' + i.name
+              stats.repos.each { repo, status ->
                 dir ('repos/' + repo) {
-                  checkoutRepo(repo)
-                  Integer retM = mergeBranch(repo, curBranch, baseBranches)
-                  if (retM != 0) {
-                    fillStats(repo, retM == 0)
-                  } else if (retM == 0) {
-                    Integer retP = unprotectBranch(repo, curBranch)
-                    Integer retD = deleteBranch(repo, curBranch)
-                    fillStats(repo, retD == 0, retP != 0)
+                  if (checkRemoteBranch(repo, curBranch)) {
+                    checkoutRepo(repo)
+                    merged = mergeBranch(repo, curBranch, baseBranches)
+                    status.primary = (merged) ? 'success' : 'failure'
+                    println merged
+                    if (merged) {
+                      unprotectBranch(repo, curBranch)
+                      deleted = deleteBranch(repo, curBranch)
+                      status.secondary = (deleted) ? 'delete' : ''
+                    }
+                  } else {
+                    echo "Branch doesn't ${curBranch} exist."
+                    status.primary = 'skip'
                   }
                 }
               }
@@ -184,10 +205,10 @@ pipeline {
           }
           steps {
             script {
-              for (i in reposList) {
-                String repo = i.owner + '/' + i.name
-                Integer ret = unprotectBranch(repo, curBranch)
-                fillStats(repo, ret == 0)
+              Boolean unlock
+              stats.repos.each { repo, status ->
+                unlock = unprotectBranch(repo, curBranch)
+                status.primary = (unlock) ? 'success' : 'failure'
               }
             }
           }
@@ -198,16 +219,44 @@ pipeline {
   post {
     success {
       script {
-        setBuildStatus()
-        if ((params.action_type == 'start_release' ||
-          params.action_type == 'merge_release' ||
-          params.action_type == 'finish_release') &&
-          params.notify && stats.success > 0) {
-          sendNotification()
-        } else if (params.action_type == 'print_branches' ||
-          params.action_type == 'unprotect_release') {
-          println stats.list
+        println "test"
+
+        String icons
+        stats.repos.each { repo, status ->
+          icons = ''
+          switch(status.primary) {
+            case 'skip':    icons += '🆗'; stats.success++; break
+            case 'success': icons += '✅'; stats.success++; break
+            case 'failure': icons += '❎'; break
+          }
+          switch(status.secondary) {
+            case 'lock':    icons += '🔒'; break
+            case 'delete':  icons += '🗑';  break
+          }
+          stats.list += '\n' + icons + ' ' + repo
         }
+
+        println stats.list
+
+        if ((params.action_type == 'start_release'
+          || params.action_type == 'merge_release'
+          || params.action_type == 'finish_release')
+          && params.notify && stats.success > 0)
+          sendNotification()
+        else if (params.action_type == 'print_branches'
+          || params.action_type == 'unprotect_release')
+          println stats.success + '/' + stats.total + '\n' + stats.list.trim()
+
+        println currentBuild.result
+
+        if (stats.success == 0)
+          currentBuild.result = 'FAILURE'
+        else if (stats.success != stats.total)
+          currentBuild.result = 'UNSTABLE'
+        else if (stats.success == stats.total)
+          currentBuild.result = 'SUCCESS'
+
+        println currentBuild.result
       }
     }
   }
@@ -219,87 +268,85 @@ def checkoutRepo(String repo, String branch = 'master') {
     script: """
       if [ "\$(GIT_DIR=.git git rev-parse --is-inside-work-tree)" = 'true' ]; then
         git fetch --all --prune
-        if ! git ls-remote --refs --exit-code . origin/${branch}; then
-          echo "Remote branch ${branch} doesn't exist."
-          exit 0
-        fi
+        git checkout -f ${branch}
         git reset --hard origin/${branch}
-        git branch -vv
+        git clean -df
       else
         rm -rfv ./*
         git clone -b ${branch} git@github.com:${repo}.git .
       fi
+      git branch -vv
     """
   )
+}
+
+def checkRemoteBranch(String repo, String branch = 'master') {
+  return sh (
+    label: "${repo}: check branch ${branch}",
+    script: "git ls-remote --exit-code git@github.com:${repo}.git ${branch}",
+    returnStatus: true
+  ) == 0
 }
 
 def createBranch(String repo, String branch, String baseBranch) {
   return sh (
     label: "${repo}: start ${branch}",
     script: """
-      if git ls-remote --refs --exit-code . origin/${branch}; then
-        echo "Remote branch ${branch} exist."
-        exit 0
-      fi
+      git checkout ${baseBranch}
       git reset --hard origin/${baseBranch}
-      git branch -vv
       git checkout -B ${branch}
       git push origin ${branch}
+      git branch -vv
     """,
     returnStatus: true
-  )
+  ) == 0
 }
 
 def mergeBranch(String repo, String branch, ArrayList baseBranches) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: merge ${branch} into ${baseBranches.join(' ')}",
-    script: """
-      if ! git ls-remote --refs --exit-code . origin/${branch}; then
-        echo "Remote branch ${branch} doesn't exist."
-        exit 0
-      fi
+    script: """#!/bin/bash -xe
+      git checkout ${branch}
+      git reset --hard origin/${branch}
       base_branches=(${baseBranches.join(' ')})
       merged=0
-      for base in \${base_branches[*]}; do
-        git reset --hard origin/${branch}
-        git branch -vv
-        gh pr create \
-          --repo ${repo} \
-          --base \$base \
-          --head ${branch} \
-          --title "Merge branch ${branch} into \$base" \
-          --fill || \
-        true
+      rev_branch=\$(git rev-parse @)
+      for base in "\${base_branches[@]}"; do
         git checkout \$base
-        git pull --ff-only origin \$base
-        git merge ${branch} \
-          --no-edit --no-ff \
+        git reset --hard origin/\$base
+        rev_base=\$(git rev-parse @)
+        if [[ \$rev_branch == \$rev_base ]]; then
+          ((++merged))
+          echo "No new commits."
+          continue
+        fi
+        gh pr create --repo ${repo} --base \$base --head ${branch} \
+          --title "Merge branch ${branch} into \$base" --fill || \
+        true
+        git merge ${branch} --no-edit --no-ff \
           -m "Merge branch ${branch} into \$base" || \
         continue
         git push origin \$base
         ((++merged))
       done
-      if [ \$merged -ne \${#base_branches[@]} ]; then
-        exit 2
-      fi
+      git branch -vv
+      [[ \$merged -ne \${#base_branches[@]} ]] && exit 2
     """,
     returnStatus: true
   )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def deleteBranch(String repo, String branch) {
   return sh (
     label: "${repo}: delete ${branch}",
     script: """
-      if ! git ls-remote --refs --exit-code . origin/${branch}; then
-        echo "Remote branch ${branch} doesn't exist."
-        exit 0
-      fi
       git branch -D ${branch}
       git push --delete origin ${branch}
     """,
     returnStatus: true
-  )
+  ) == 0
 }
 
 def protectBranch(String repo, String branch) {
@@ -318,7 +365,7 @@ def protectBranch(String repo, String branch) {
       gh api -X PUT repos/${repo}/branches/${branch}/protection --input -
     """,
     returnStatus: true
-  )
+  ) == 0
 }
 
 def printBranches(String repo) {
@@ -329,7 +376,7 @@ def printBranches(String repo) {
       jq -c '.[] | { name, protected }'
     """,
     returnStatus: true
-  )
+  ) == 0
 }
 
 def unprotectBranch(String repo, String branch) {
@@ -337,24 +384,7 @@ def unprotectBranch(String repo, String branch) {
     label: "${repo}: unprotect ${branch}",
     script: "gh api -X DELETE repos/${repo}/branches/${branch}/protection",
     returnStatus: true
-  )
-}
-
-def fillStats(String repo, Boolean primary, Boolean secondary = false) {
-  if (primary) stats.success++
-  if (primary) stats.list += '\n✅' else stats.list += '\n❎'
-  if (secondary) stats.list += '🛡'
-  stats.list += " ${repo}"
-}
-
-def setBuildStatus() {
-  if (stats.success == 0) {
-    currentBuild.result = 'FAILURE'
-  } else if (stats.success != stats.total) {
-    currentBuild.result = 'UNSTABLE'
-  } else if (stats.success == stats.total) {
-    currentBuild.result = 'SUCCESS'
-  }
+  ) == 0
 }
 
 def sendNotification() {
