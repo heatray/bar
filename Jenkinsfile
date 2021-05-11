@@ -237,6 +237,16 @@ pipeline {
         }
 
         println stats.list
+
+        if ((params.action_type == 'start_release'
+          || params.action_type == 'merge_release'
+          || params.action_type == 'finish_release')
+          && params.notify && stats.success > 0)
+          sendNotification()
+        else if (params.action_type == 'print_branches'
+          || params.action_type == 'unprotect_release')
+          println stats.success + '/' + stats.total + '\n' + stats.list.trim()
+
         println currentBuild.result
 
         if (stats.success == 0)
@@ -247,15 +257,6 @@ pipeline {
           currentBuild.result = 'SUCCESS'
 
         println currentBuild.result
-
-        if ((params.action_type == 'start_release'
-          || params.action_type == 'merge_release'
-          || params.action_type == 'finish_release')
-          && params.notify && stats.success > 0)
-          sendNotification()
-        else if (params.action_type == 'print_branches'
-          || params.action_type == 'unprotect_release')
-          println stats.success + '/' + stats.total + '\n' + stats.list.trim()
       }
     }
   }
