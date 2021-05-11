@@ -218,8 +218,9 @@ pipeline {
   post {
     success {
       script {
+        String icons
         stats.repos.each { repo, status ->
-          String icons = ''
+          icons = ''
           switch(status.primary) {
             case 'skip':    icons += '🆗'; stats.success++; break
             case 'success': icons += '✅'; stats.success++; break
@@ -330,10 +331,6 @@ def deleteBranch(String repo, String branch) {
   return sh (
     label: "${repo}: delete ${branch}",
     script: """
-      if ! git ls-remote --refs --exit-code . origin/${branch}; then
-        echo "Remote branch ${branch} doesn't exist."
-        exit 0
-      fi
       git branch -D ${branch}
       git push --delete origin ${branch}
     """,
