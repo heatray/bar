@@ -173,7 +173,8 @@ pipeline {
           steps {
             script {
               baseBranches = ['master', 'develop']
-              if (!extraBranch.isEmpty()) baseBranches.add(extraBranch)
+              if (!params.extra_branch.isEmpty())
+                baseBranches.add(params.extra_branch)
               Boolean exists = checkRemoteBranch(repo, curBranch)
               Boolean unlocked
               Boolean merged
