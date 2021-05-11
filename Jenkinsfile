@@ -281,15 +281,17 @@ def checkoutRepo(String repo, String branch = 'master') {
 }
 
 def checkRemoteBranch(String repo, String branch = 'master') {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: check branch ${branch}",
     script: "git ls-remote --exit-code git@github.com:${repo}.git ${branch}",
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def createBranch(String repo, String branch, String baseBranch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: start ${branch}",
     script: """
       git checkout ${baseBranch}
@@ -299,7 +301,9 @@ def createBranch(String repo, String branch, String baseBranch) {
       git branch -vv
     """,
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def mergeBranch(String repo, String branch, ArrayList baseBranches) {
@@ -331,6 +335,7 @@ def mergeBranch(String repo, String branch, ArrayList baseBranches) {
       done
       git branch -vv
       [[ \$merged -ne \${#base_branches[@]} ]] && exit 2
+      exit 0
     """,
     returnStatus: true
   )
@@ -339,18 +344,20 @@ def mergeBranch(String repo, String branch, ArrayList baseBranches) {
 }
 
 def deleteBranch(String repo, String branch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: delete ${branch}",
     script: """
       git branch -D ${branch}
       git push --delete origin ${branch}
     """,
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def protectBranch(String repo, String branch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: protect ${branch}",
     script: """
       echo '{
@@ -365,26 +372,32 @@ def protectBranch(String repo, String branch) {
       gh api -X PUT repos/${repo}/branches/${branch}/protection --input -
     """,
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def printBranches(String repo) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: branches list",
     script: """
       gh api -X GET repos/${repo}/branches?per_page=100 | \
       jq -c '.[] | { name, protected }'
     """,
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def unprotectBranch(String repo, String branch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: unprotect ${branch}",
     script: "gh api -X DELETE repos/${repo}/branches/${branch}/protection",
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def sendNotification() {
