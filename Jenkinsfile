@@ -111,7 +111,6 @@ pipeline {
           steps {
             script {
               baseBranches = [BRANCH_NAME]
-              Boolean exists = checkRemoteBranch(repo, newBranch)
               Boolean created
               Boolean locked
 
@@ -122,7 +121,7 @@ pipeline {
                     && !createBranch(repo, 'develop', 'master'))
                     error("Can't create develop branch.")
 
-                  if (!exists) {
+                  if (!checkRemoteBranch(repo, newBranch)) {
                     created = createBranch(repo, newBranch, baseBranches[0])
                     status.primary = (created) ? 'success' : 'failure'
                   } else {
@@ -147,12 +146,11 @@ pipeline {
           steps {
             script {
               baseBranches = ['master']
-              Boolean exists = checkRemoteBranch(repo, curBranch)
               Boolean merged
 
               stats.repos.each { repo, status ->
                 dir ('repos/' + repo) {
-                  if (exists) {
+                  if (checkRemoteBranch(repo, curBranch)) {
                     checkoutRepo(repo)
                     merged = mergeBranch(repo, curBranch, baseBranches)
                     status.primary = (merged) ? 'success' : 'failure'
@@ -175,14 +173,13 @@ pipeline {
               baseBranches = ['master', 'develop']
               if (!params.extra_branch.isEmpty())
                 baseBranches.add(params.extra_branch)
-              Boolean exists = checkRemoteBranch(repo, curBranch)
               Boolean unlocked
               Boolean merged
               Boolean deleted
 
               stats.repos.each { repo, status ->
                 dir ('repos/' + repo) {
-                  if (exists) {
+                  if (checkRemoteBranch(repo, curBranch)) {
                     checkoutRepo(repo)
                     merged = mergeBranch(repo, curBranch, baseBranches)
                     status.primary = (merged) ? 'success' : 'failure'
