@@ -231,7 +231,7 @@ pipeline {
             case 'lock':    icons += '🔒'; break
             case 'delete':  icons += '🗑';  break
           }
-          stats.list += '\n' + icons + repo
+          stats.list += '\n' + icons + ' ' + repo
         }
 
         if (stats.success == 0)
@@ -248,7 +248,7 @@ pipeline {
           sendNotification()
         else if (params.action_type == 'print_branches'
           || params.action_type == 'unprotect_release')
-          println stats.list.trim()
+          println stats.success + '/' + stats.total + '\n' + stats.list.trim()
       }
     }
   }
