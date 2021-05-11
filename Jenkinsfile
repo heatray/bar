@@ -183,6 +183,7 @@ pipeline {
                     checkoutRepo(repo)
                     merged = mergeBranch(repo, curBranch, baseBranches)
                     status.primary = (merged) ? 'success' : 'failure'
+                    println merged
                     if (merged) {
                       unprotectBranch(repo, curBranch)
                       deleted = deleteBranch(repo, curBranch)
@@ -218,6 +219,8 @@ pipeline {
   post {
     success {
       script {
+        println "test"
+
         String icons
         stats.repos.each { repo, status ->
           icons = ''
@@ -233,12 +236,17 @@ pipeline {
           stats.list += '\n' + icons + ' ' + repo
         }
 
+        println stats.list
+        println currentBuild.result
+
         if (stats.success == 0)
           currentBuild.result = 'FAILURE'
         else if (stats.success != stats.total)
           currentBuild.result = 'UNSTABLE'
         else if (stats.success == stats.total)
           currentBuild.result = 'SUCCESS'
+
+        println currentBuild.result
 
         if ((params.action_type == 'start_release'
           || params.action_type == 'merge_release'
