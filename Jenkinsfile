@@ -1,6 +1,6 @@
 defaults = [
   action_type: ['print_branches'],
-  version: '',
+  action_help: '',
   protect_branch: false
 ]
 
@@ -11,20 +11,19 @@ isRelease = BRANCH_NAME.startsWith('release')
 
 if (isMaster || isDevelop) {
   defaults.action_type.add('start_release')
-  defaults.version = '0.0.0'
   defaults.protect_branch = true
   if (isMaster) {
     defaults.release_type = 'hotfix'
   } else if (isDevelop) {
     defaults.release_type = 'release'
   }
+  defaults.action_help = " (start for ${defaults.release_type} on current branch)"
 } else if (isHotfix || isRelease) {
   defaults.action_type.addAll(['merge_release', 'finish_release', 'unprotect_release'])
 }
 
 reposList = [
-  [owner: 'heatray', name: 'foo', dir: 'foo'],
-  [owner: 'heatray', name: 'bar', dir: 'bar']
+  [owner: 'heatray', name: 'foo', dir: 'foo']
 ]
 
 pipeline {
@@ -37,13 +36,13 @@ pipeline {
     )
     choice (
       name:         'action_type',
-      description:  "Action type\nmaster > hotfix\ndevelop > release",
+      description:  "Action type" + defaults.action_help,
       choices:      defaults.action_type
     )
     string (
       name:         'vesion',
       description:  'Release version (for start_release only)',
-      defaultValue: defaults.version
+      defaultValue: '0.0.0'
     )
     booleanParam (
       name:         'protect_branch',
@@ -62,155 +61,124 @@ pipeline {
     )
   }
   stages {
-    stage('Prepare') {
+    stage('Branch Manager') {
       steps {
         script {
           if (params.wipe) {
             deleteDir()
             checkout scm
           }
+          currentBuild.displayName += ' - ' + params.action_type
           // utils = load 'utils.groovy'
-          curBranch = BRANCH_NAME
-          newBranch = defaults.release_type + '/v' + params.vesion
+          currentBranch = BRANCH_NAME
           baseBranches = []
           // reposList = utils.getReposList()
           stats = [
             repos: [:],
             list: '',
             success: 0,
-            total: reposList.size()
+            total: 0
           ]
           reposList.each {
             stats.repos.put(it.owner + '/' + it.name, [:])
           }
-        }
-      }
-    }
-    stage('Stages') {
-      parallel {
-        stage('Print Branches') {
-          when {
-            expression { params.action_type == 'print_branches' }
-            beforeAgent true
-          }
-          steps {
-            script {
-              Boolean printed
-              stats.repos.each { repo, status ->
-                printed = printBranches(repo)
-                status.primary = (printed) ? 'success' : 'failure'
-              }
-            }
-          }
-        }
-        stage('Start Release') {
-          when {
-            expression { params.action_type == 'start_release' }
-            beforeAgent true
-          }
-          steps {
-            script {
-              baseBranches = [BRANCH_NAME]
-              Boolean created
-              Boolean locked
 
-              stats.repos.each { repo, status ->
+          if (params.action_type == 'print_branches') {
+
+            Boolean printed
+            stats.repos.each { repo, status ->
+              printed = printBranches(repo)
+              status.primary = (printed) ? 'success' : 'failure'
+              echo "${repo}: print - ${status.primary}"
+            }
+
+          } else if (params.action_type == 'start_release') {
+
+            currentBranch = defaults.release_type + '/v' + params.vesion
+            baseBranches = [BRANCH_NAME]
+            Boolean created
+            Boolean locked
+
+            stats.repos.each { repo, status ->
+              if (checkRemoteBranch(repo, currentBranch)) {
+                echo "Branch already ${currentBranch} exists."
+                status.primary = 'skip'
+              } else {
                 dir ('repos/' + repo) {
                   checkoutRepo(repo)
                   if (!checkRemoteBranch(repo, 'develop')
                     && !createBranch(repo, 'develop', 'master'))
                     error("Can't create develop branch.")
 
-                  if (!checkRemoteBranch(repo, newBranch)) {
-                    created = createBranch(repo, newBranch, baseBranches[0])
-                    status.primary = (created) ? 'success' : 'failure'
-                  } else {
-                    echo "Branch already ${newBranch} exists."
-                    status.primary = 'skip'
-                  }
-
-                  if (params.protect_branch) {
-                    locked = protectBranch(repo, newBranch)
-                    status.secondary = (locked) ? 'lock' : ''
-                  }
+                  created = createBranch(repo, currentBranch, baseBranches[0])
+                  status.primary = (created) ? 'success' : 'failure'
                 }
               }
-            }
-          }
-        }
-        stage('Merge Release') {
-          when {
-            expression { params.action_type == 'merge_release' }
-            beforeAgent true
-          }
-          steps {
-            script {
-              baseBranches = ['master']
-              Boolean merged
+              echo "${repo}: create - ${status.primary}"
 
-              stats.repos.each { repo, status ->
+              if (params.protect_branch) {
+                locked = protectBranch(repo, currentBranch)
+                status.secondary = (locked) ? 'lock' : ''
+                echo "${repo}: ${status.secondary}"
+              }
+            }
+
+          } else if (params.action_type == 'merge_release') {
+
+            baseBranches = ['master']
+            Boolean merged
+
+            stats.repos.each { repo, status ->
+              if (!checkRemoteBranch(repo, currentBranch)) {
+                echo "Branch doesn't ${currentBranch} exist."
+                status.primary = 'skip'
+              } else {
                 dir ('repos/' + repo) {
-                  if (checkRemoteBranch(repo, curBranch)) {
-                    checkoutRepo(repo)
-                    merged = mergeBranch(repo, curBranch, baseBranches)
-                    status.primary = (merged) ? 'success' : 'failure'
-                  } else {
-                    echo "Branch doesn't ${curBranch} exist."
-                    status.primary = 'skip'
-                  }
+                  checkoutRepo(repo)
+                  merged = mergeBranch(repo, currentBranch, baseBranches)
+                  status.primary = (merged) ? 'success' : 'failure'
                 }
               }
+              echo "${repo}: merge - ${status.primary}"
             }
-          }
-        }
-        stage('Finish Release') {
-          when {
-            expression { params.action_type == 'finish_release' }
-            beforeAgent true
-          }
-          steps {
-            script {
-              baseBranches = ['master', 'develop']
-              if (!params.extra_branch.isEmpty())
-                baseBranches.add(params.extra_branch)
-              Boolean unlocked
-              Boolean merged
-              Boolean deleted
 
-              stats.repos.each { repo, status ->
+          } else if (params.action_type == 'finish_release') {
+
+            baseBranches = ['master', 'develop']
+            if (!params.extra_branch.isEmpty())
+              baseBranches.add(params.extra_branch)
+            Boolean unlocked
+            Boolean merged
+            Boolean deleted
+
+            stats.repos.each { repo, status ->
+              if (!checkRemoteBranch(repo, currentBranch)) {
+                echo "Branch doesn't ${currentBranch} exist."
+                status.primary = 'skip'
+              } else {
                 dir ('repos/' + repo) {
-                  if (checkRemoteBranch(repo, curBranch)) {
-                    checkoutRepo(repo)
-                    merged = mergeBranch(repo, curBranch, baseBranches)
-                    status.primary = (merged) ? 'success' : 'failure'
-                    println merged
-                    if (merged) {
-                      unprotectBranch(repo, curBranch)
-                      deleted = deleteBranch(repo, curBranch)
-                      status.secondary = (deleted) ? 'delete' : ''
-                    }
-                  } else {
-                    echo "Branch doesn't ${curBranch} exist."
-                    status.primary = 'skip'
+                  checkoutRepo(repo)
+                  merged = mergeBranch(repo, currentBranch, baseBranches)
+                  status.primary = (merged) ? 'success' : 'failure'
+                  echo "${repo}: merge - ${status.primary}"
+                  if (merged) {
+                    unprotectBranch(repo, currentBranch)
+                    deleted = deleteBranch(repo, currentBranch)
+                    status.secondary = (deleted) ? 'delete' : ''
+                    echo "${repo}: ${status.secondary}"
                   }
                 }
               }
             }
-          }
-        }
-        stage('Unprotect Release') {
-          when {
-            expression { params.action_type == 'unprotect_release' }
-            beforeAgent true
-          }
-          steps {
-            script {
-              Boolean unlock
-              stats.repos.each { repo, status ->
-                unlock = unprotectBranch(repo, curBranch)
-                status.primary = (unlock) ? 'success' : 'failure'
-              }
+
+          } else if (params.action_type == 'unprotect_release') {
+
+            Boolean unlock
+            stats.repos.each { repo, status ->
+              unlock = unprotectBranch(repo, currentBranch)
+              status.primary = (unlock) ? 'success' : 'failure'
             }
+
           }
         }
       }
@@ -219,35 +187,10 @@ pipeline {
   post {
     success {
       script {
-        println "test"
-
-        String icons
-        stats.repos.each { repo, status ->
-          icons = ''
-          switch(status.primary) {
-            case 'skip':    icons += '🆗'; stats.success++; break
-            case 'success': icons += '✅'; stats.success++; break
-            case 'failure': icons += '❎'; break
-          }
-          switch(status.secondary) {
-            case 'lock':    icons += '🔒'; break
-            case 'delete':  icons += '🗑';  break
-          }
-          stats.list += '\n' + icons + ' ' + repo
-        }
-
-        println stats.list
-
-        if ((params.action_type == 'start_release'
-          || params.action_type == 'merge_release'
-          || params.action_type == 'finish_release')
-          && params.notify && stats.success > 0)
-          sendNotification()
-        else if (params.action_type == 'print_branches'
-          || params.action_type == 'unprotect_release')
-          println stats.success + '/' + stats.total + '\n' + stats.list.trim()
-
-        println currentBuild.result
+        stats.success = stats.repos.findAll { repo, status ->
+          status.primary == 'skip' || status.primary == 'success'
+        }.size()
+        stats.total = stats.repos.size()
 
         if (stats.success == 0)
           currentBuild.result = 'FAILURE'
@@ -256,7 +199,7 @@ pipeline {
         else if (stats.success == stats.total)
           currentBuild.result = 'SUCCESS'
 
-        println currentBuild.result
+        sendNotification()
       }
     }
   }
@@ -281,15 +224,17 @@ def checkoutRepo(String repo, String branch = 'master') {
 }
 
 def checkRemoteBranch(String repo, String branch = 'master') {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: check branch ${branch}",
     script: "git ls-remote --exit-code git@github.com:${repo}.git ${branch}",
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def createBranch(String repo, String branch, String baseBranch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: start ${branch}",
     script: """
       git checkout ${baseBranch}
@@ -299,7 +244,9 @@ def createBranch(String repo, String branch, String baseBranch) {
       git branch -vv
     """,
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def mergeBranch(String repo, String branch, ArrayList baseBranches) {
@@ -331,6 +278,7 @@ def mergeBranch(String repo, String branch, ArrayList baseBranches) {
       done
       git branch -vv
       [[ \$merged -ne \${#base_branches[@]} ]] && exit 2
+      exit 0
     """,
     returnStatus: true
   )
@@ -339,18 +287,31 @@ def mergeBranch(String repo, String branch, ArrayList baseBranches) {
 }
 
 def deleteBranch(String repo, String branch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: delete ${branch}",
     script: """
       git branch -D ${branch}
       git push --delete origin ${branch}
     """,
     returnStatus: true
+  )
+  println "ret: $ret"
+  return ret == 0
+}
+
+def printBranches(String repo) {
+  return sh (
+    label: "${repo}: branches list",
+    script: """
+      gh api -X GET repos/${repo}/branches?per_page=100 | \
+      jq -r '.[] | [.name, .protected] | @tsv'
+    """,
+    returnStatus: true
   ) == 0
 }
 
 def protectBranch(String repo, String branch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: protect ${branch}",
     script: """
       echo '{
@@ -365,53 +326,69 @@ def protectBranch(String repo, String branch) {
       gh api -X PUT repos/${repo}/branches/${branch}/protection --input -
     """,
     returnStatus: true
-  ) == 0
-}
-
-def printBranches(String repo) {
-  return sh (
-    label: "${repo}: branches list",
-    script: """
-      gh api -X GET repos/${repo}/branches?per_page=100 | \
-      jq -c '.[] | { name, protected }'
-    """,
-    returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def unprotectBranch(String repo, String branch) {
-  return sh (
+  Integer ret = sh (
     label: "${repo}: unprotect ${branch}",
     script: "gh api -X DELETE repos/${repo}/branches/${branch}/protection",
     returnStatus: true
-  ) == 0
+  )
+  println "ret: $ret"
+  return ret == 0
 }
 
 def sendNotification() {
   Integer chatId = -579429080 // test
-  String text
+  String text = ''
   switch(params.action_type) {
     case 'start_release':
-      text = "Branch `${curBranch}` created from `${baseBranches[0]}`"
+      text = "Branch `${currentBranch}` created from `${baseBranches[0]}`"
       break
     case 'merge_release':
-      text = "Branch `${curBranch}` merged into `${baseBranches[0]}`"
+      text = "Branch `${currentBranch}` merged into `${baseBranches[0]}`"
       break
     case 'finish_release':
-      text = "Branch `${curBranch}` merged into "
+      text = "Branch `${currentBranch}` merged into "
       text += baseBranches.collect({"`$it`"}).join(', ')
       break
+    default:
+      text = 'Stats'
+      break
   }
-  text += " \\[${stats.success}/${stats.total}]${stats.list}"
+  text += " \\[${stats.success}/${stats.total}]"
+  stats.repos.each { repo, status ->
+    text += '\n'
+    switch(status.primary) {
+      case 'skip':    text += '🆗'; break
+      case 'success': text += '✅'; break
+      case 'failure': text += '❎'; break
+    }
+    switch(status.secondary) {
+      case 'lock':    text += '🔒'; break
+      case 'delete':  text += '♻️'; break
+    }
+    text += ' ' + repo
+  }
 
-  withCredentials([string(
-    credentialsId: 'telegram-bot-token',
-    variable: 'TELEGRAM_TOKEN'
-  )]) {
-    sh label: "Send Telegram Notification", script: "curl -X POST -s -S \
-      -d parse_mode=markdown \
-      -d chat_id=${chatId} \
-      --data-urlencode text='${text}' \
-      https://api.telegram.org/bot\$TELEGRAM_TOKEN/sendMessage"
+  if ((params.action_type == 'start_release'
+    || params.action_type == 'merge_release'
+    || params.action_type == 'finish_release')
+    && params.notify && stats.success > 0) {
+    withCredentials([string(
+      credentialsId: 'telegram-bot-token',
+      variable: 'TELEGRAM_TOKEN'
+    )]) {
+      sh label: "Send Telegram Notification", script: "curl -X POST -s -S \
+        -d parse_mode=markdown \
+        -d chat_id=${chatId} \
+        --data-urlencode text='${text}' \
+        https://api.telegram.org/bot\$TELEGRAM_TOKEN/sendMessage"
+    }
+  } else {
+    echo text
   }
 }
