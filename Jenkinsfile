@@ -254,40 +254,36 @@ def mergeBranch(String repo, String branch, ArrayList baseBranches) {
     label: "${repo}: merge ${branch} into ${baseBranches.join(' ')}",
     script: """#!/bin/bash -xe
       git checkout ${branch}
-      echo \$?
       git reset --hard origin/${branch}
-      echo \$?
       base_branches=(${baseBranches.join(' ')})
       merged=0
       rev_branch=\$(git rev-parse @)
-      echo \$?
       for base in "\${base_branches[@]}"; do
         git checkout \$base
-        echo \$?
         git reset --hard origin/\$base
-        echo \$?
         rev_base=\$(git rev-parse @)
-        echo \$?
         if [[ \$rev_branch == \$rev_base ]]; then
           ((++merged))
           echo "No new commits."
           continue
         fi
         gh pr create --repo ${repo} --base \$base --head ${branch} \
-          --title "Merge branch ${branch} into \$base" --fill
-        echo \$?
+          --title "Merge branch ${branch} into \$base" --fill || \
+        true
         git merge ${branch} --no-edit --no-ff \
           -m "Merge branch ${branch} into \$base" || \
         continue
         git push origin \$base
-        echo \$?
         ((++merged))
       done
       git branch -vv
-      echo \$?
-      [[ \$merged -ne \${#base_branches[@]} ]] && exit 2
-      echo \$?
-      exit 0
+      echo "merged - \$merged // total - \${#base_branches[@]}"
+      if [[ \$merged -ne \${#base_branches[@]} ]]; then
+        echo "retcode: \$?"
+        exit 2
+      fi
+      echo "retcode: \$?"
+      #exit 0
     """,
     returnStatus: true
   )
