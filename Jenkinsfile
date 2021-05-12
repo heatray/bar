@@ -67,7 +67,7 @@ pipeline {
           }
           currentBuild.displayName += ' - ' + params.action_type
 
-          stats = [:]
+          stats = [repos: [:]]
           String branch = BRANCH_NAME
           ArrayList baseBranches = []
           // def utils = load 'utils.groovy'
