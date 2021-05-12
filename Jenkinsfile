@@ -1,6 +1,7 @@
 defaults = [
   action_type: ['print_branches'],
   action_help: '',
+  version: '0.0.0',
   protect_branch: false
 ]
 
@@ -42,7 +43,7 @@ pipeline {
     string (
       name:         'vesion',
       description:  'Release version (for start_release only)',
-      defaultValue: '0.0.0'
+      defaultValue: defaults.vesion
     )
     booleanParam (
       name:         'protect_branch',
@@ -356,10 +357,10 @@ def sendNotification() {
     text += ' ' + repo
   }
 
-  if ((params.action_type == 'start_release'
+  if (params.notify && stats.success > 0
+    && (params.action_type == 'start_release'
     || params.action_type == 'merge_release'
-    || params.action_type == 'finish_release')
-    && params.notify && stats.success > 0) {
+    || params.action_type == 'finish_release')) {
     withCredentials([string(
       credentialsId: 'telegram-bot-token',
       variable: 'TELEGRAM_TOKEN'
