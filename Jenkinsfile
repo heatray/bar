@@ -23,7 +23,6 @@ reposList = [
   [owner: 'heatray', name: 'foo', dir: 'foo']
 ]
 
-
 pipeline {
   agent { label 'linux_64' }
   parameters {
